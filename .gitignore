@@ -8,3 +8,6 @@
 
 **/*.out
 **/*.exe
+
+# compiled program
+!AssemblerInterpreter.exe
