@@ -10,4 +10,7 @@
 **/*.exe
 
 # compiled program
+# Windows
 !AssemblerInterpreter.exe
+# Linux
+!AssemblerInterpreter.out
