@@ -1,3 +1,9 @@
+# DEBUG 
+# ingore every file that doesn't have an extension
+!*/
+*
+!*.*
+
 **/.vscode
 
 **/*.out

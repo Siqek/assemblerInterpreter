@@ -45,10 +45,9 @@ private:
         InstructionType type; 
         std::vector<std::string> args;
     };
-    // stores subroutine labels and their corresponding sequences of instructions
-    std::unordered_map<std::string, std::vector<Interpreter::instruction>> subroutines;
-    // stores the main program as a list of instructions (including type and arguments)
-    // instructions of subroutines are stored separately in `this->subroutines`
+    // stores subroutine labels and their corresponding positions in the program
+    std::unordered_map<std::string, size_t> subroutines;
+    // stores the entire program as a list of instructions (including type and arguments)
     std::vector<Interpreter::instruction> instructions;
 
     // stores the current pattern of message, which is outputted at the end of the program
@@ -121,11 +120,12 @@ void Interpreter::parseProgram()
     // This function parses the program code stored in the `program` string.
     // It processes each line, identifying instructions, their arguments, and subroutine labels.
     // Comments starting with ';' are ignored, and leading/trailing whitespaces are trimmed.
-    // Subroutines are stored in `this->subroutines`, while other instructions are stored in `this->instructions`.
+    // Entire program is stored in `this->instructions` as { type, args }.
+    // Subroutine positions are stored in `this->subroutines`.
     //
     // Key behaviors:
     // - Lines with no instructions or only comments are skipped.
-    // - Subroutines (indicated by labels ending with ':') are stored as a sequence of instructions.
+    // - Subroutines (indicated by labels ending with ':') are stored as a position in the program.
     // - Supported instructions are matched to their `InstructionType`. Unknown instructions are logged as errors and an exception is thrown.
     // - Instruction arguments are parsed.
 
@@ -141,8 +141,6 @@ void Interpreter::parseProgram()
         return pos == std::string::npos ? "" : str.substr(pos);
     };
     auto trim = [&](const std::string& str) -> std::string { return rtrim(ltrim(str)); };
-
-    std::string subroutine = "";
 
     while (std::getline(l_program, line)) {
         // remove everything after first ';' (crop comments)
@@ -162,11 +160,11 @@ void Interpreter::parseProgram()
 
         InstructionType instructionType = InstructionType::NONE;
 
-        // set the current subroutine name (LABEL instruction)
-        // all subsequent instructions will be associated with this subroutine
+        // check if the current instruction is a label
         if (type.length() > 1 && type.back() == ':') {
-            subroutine = type.substr(0, type.length() - 1);
-            this->subroutines[subroutine] = {};
+            std::string subroutine = type.substr(0, type.length() - 1);
+            // set the position of the subroutine
+            this->subroutines[subroutine] = this->instructions.size();
             continue;
         }
 
@@ -233,55 +231,26 @@ void Interpreter::parseProgram()
             }
         }
 
-        // check if the current instruction is part of a subroutine
-        if (subroutine == "") {
-            // if no subroutine is active, add the instruction to the main instruction list
-            this->instructions.push_back(Interpreter::instruction{instructionType, args});
-        } else {
-            // add instruction to the current subroutine
-            // a subroutine is defined by a label and ends with a RET instruction or the start of another subroutine
-            this->subroutines[subroutine].push_back(Interpreter::instruction{instructionType, args});
-            // clear the subroutine name (RET instruction is an end of the subroutine definition)
-            if (instructionType == InstructionType::RET) subroutine = "";
-        }
+        // store the parsed instruciton
+        this->instructions.push_back(Interpreter::instruction{instructionType, args});
     }
 }
 
 void Interpreter::execute()
 {
-    struct callFrame {
-        std::vector<Interpreter::instruction> instructions;
-        size_t instructionPointer;
-        // bool calledSubroutine;
-        
-        callFrame(std::vector<Interpreter::instruction> instr)
-            : instructions(std::move(instr)), instructionPointer(0) {} //, calledSubroutine(false) {};
-    };
-    std::stack<callFrame> call_stack{};
+    size_t instructionPointer = 0;
+    std::stack<size_t> call_stack{};
 
-    call_stack.push(this->instructions);
+    bool isFinished = false;
 
-    // bool isFrameFinishedByRet = false;
-
-    while (!call_stack.empty()) {
-        auto& frame = call_stack.top();
-
-        if (frame.instructionPointer >= frame.instructions.size()) {
-            // isFrameFinishedByRet = false;
-            call_stack.pop(); // TODO fix this (dont pop, just continue with the next instruction)
-
+    while (!isFinished) {
+        // check if the program is finished
+        if (instructionPointer >= this->instructions.size()) {
+            isFinished = true;
             continue;
         }
 
-        // if (frame.calledSubroutine) {
-        //     if (isFrameFinishedByRet) {
-        //         frame.calledSubroutine = false;
-        //     } else {
-        //         break;
-        //     }
-        // }
-
-        Interpreter::instruction& instr = frame.instructions[frame.instructionPointer++];
+        Interpreter::instruction& instr = this->instructions[instructionPointer++];
 
         auto validateArgCount = [&](const size_t desiredSize) -> void {
             if (instr.args.size() != desiredSize) throw "ERROR::INTERPRETER::INVALID_NUMBER_OF_ARGS: " + std::to_string(instr.args.size());
@@ -304,18 +273,14 @@ void Interpreter::execute()
             }
             return val;
         };
-        auto findSubroutine = [&](const std::string& name) -> auto {
+        auto findSubroutine = [&](const std::string& name) -> size_t {
             auto it = this->subroutines.find(name);
             if (it == this->subroutines.end()) {
                 throw "ERROR::INTERPRETER::CAN_NOT_FIND_SUBROUTINE: " + name;
             }
             return it->second;
         };
-        auto replaceTopFrame = [&](const std::vector<Interpreter::instruction>& frame){
-            call_stack.pop();
-            call_stack.push(frame);
-        };
-
+        
         switch (instr.type)
         {
         case InstructionType::MOV:
@@ -348,7 +313,7 @@ void Interpreter::execute()
             break;
         case InstructionType::JMP:
             validateArgCount(1);
-            replaceTopFrame(findSubroutine(instr.args[0]));
+            instructionPointer = findSubroutine(instr.args[0]);
             continue;
         case InstructionType::CMP:
             validateArgCount(2);
@@ -357,54 +322,54 @@ void Interpreter::execute()
         case InstructionType::JNE:
             validateArgCount(1);
             if (this->cmpResult != 0) {
-                replaceTopFrame(findSubroutine(instr.args[0]));
+                instructionPointer = findSubroutine(instr.args[0]);
             }
             continue;
         case InstructionType::JE:
             validateArgCount(1);
             if (this->cmpResult == 0) {
-                replaceTopFrame(findSubroutine(instr.args[0]));
+                instructionPointer = findSubroutine(instr.args[0]);
             }
             continue;
         case InstructionType::JGE:
             validateArgCount(1);
             if (this->cmpResult >= 0) {
-                replaceTopFrame(findSubroutine(instr.args[0]));
+                instructionPointer = findSubroutine(instr.args[0]);
             }
             continue;
         case InstructionType::JG:
             validateArgCount(1);
             if (this->cmpResult > 0) {
-                replaceTopFrame(findSubroutine(instr.args[0]));
+                instructionPointer = findSubroutine(instr.args[0]);
             }
             continue;
         case InstructionType::JLE:
             validateArgCount(1);
             if (this->cmpResult <= 0) {
-                replaceTopFrame(findSubroutine(instr.args[0]));
+                instructionPointer = findSubroutine(instr.args[0]);
             }
             continue;
         case InstructionType::JL:
             validateArgCount(1);
             if (this->cmpResult < 0) {
-                replaceTopFrame(findSubroutine(instr.args[0]));
+                instructionPointer = findSubroutine(instr.args[0]);
             }
             continue;
         case InstructionType::CALL:
             validateArgCount(1);
-            // frame.calledSubroutine = true;
-            call_stack.push(findSubroutine(instr.args[0]));
+            call_stack.push(instructionPointer);
+            instructionPointer = findSubroutine(instr.args[0]);
             break;
         case InstructionType::MSG:
             this->messagePattern = instr.args;
             break;
         case InstructionType::RET:
-            // isFrameFinishedByRet = true;
+            instructionPointer = call_stack.top();
             call_stack.pop();
             break;
         case InstructionType::END:
             this->createMessage();
-            call_stack = {};
+            isFinished = true;
             break;
         default:
             break;
