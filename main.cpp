@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <vector>
 #include <stack>
+#include <cstdlib>
 
 enum InstructionType {
     NONE, // Default or uninitialized state
@@ -420,43 +421,85 @@ std::string assembler_interpreter(std::string program) {
 
 int main ()
 {
-//     std::string program = R"(
-// call  func1
-// call  print
-// end
+    struct program {
+        std::string id;
+        std::string desc;
+        std::string code;
+    };
+    
+    std::vector<program> programs{
+        {"#1", "\"My first program\"", R"(
+; My first program
+mov  a, 5
+inc  a
+call function
+msg  '(5+1)/2 = ', a    ; output message
+end
 
-// func1:
-//     call  func2
-//     ret
-
-// func2:
-//     ret
-
-// print:
-//     msg 'This program should return -1')";
-std::string program = R"(
-mov   a, 2            ; value1
-mov   b, 10           ; value2
-mov   c, a            ; temp1
-mov   d, b            ; temp2
-call  proc_func
+function:
+    div  a, 2
+    ret)"}, {"#2", "Five factorial", R"(
+mov   a, 5
+mov   b, a
+mov   c, a
+call  proc_fact
 call  print
 end
 
-proc_func:
-    cmp   d, 1
-    je    continue
-    mul   c, a
-    dec   d
-    call  proc_func
-
-continue:
+proc_fact:
+    dec   b
+    mul   c, b
+    cmp   b, 1
+    jne   proc_fact
     ret
 
 print:
-    msg a, '^', b, ' = ', c
-    ret)";
-    std::string program2 = R"(
+    msg   a, '! = ', c ; output text
+    ret
+)"}, {"#3", "8th term of Fibonacci sequence", R"(
+mov   a, 8            ; value
+mov   b, 0            ; next
+mov   c, 0            ; counter
+mov   d, 0            ; first
+mov   e, 1            ; second
+call  proc_fib
+call  print
+end
+
+proc_fib:
+    cmp   c, 2
+    jl    func_0
+    mov   b, d
+    add   b, e
+    mov   d, e
+    mov   e, b
+    inc   c
+    cmp   c, a
+    jle   proc_fib
+    ret
+
+func_0:
+    mov   b, c
+    inc   c
+    jmp   proc_fib
+
+print:
+    msg   'Term ', a, ' of Fibonacci series is: ', b        ; output text
+    ret)"}, {"#4", "Modulo operation", R"(
+mov   a, 11           ; value1
+mov   b, 3            ; value2
+call  mod_func
+msg   'mod(', a, ', ', b, ') = ', d        ; output
+end
+
+; Mod function
+mod_func:
+    mov   c, a        ; temp1
+    div   c, b
+    mul   c, b
+    mov   d, a        ; temp2
+    sub   d, c
+    ret)"}, {"#5", "GCD", R"(
 mov   a, 81         ; value1
 mov   b, 153        ; value2
 call  init
@@ -501,29 +544,122 @@ b_abs:
 
 print:
     msg   'gcd(', a, ', ', b, ') = ', c
-    ret)";
+    ret)"}, {"#6", "Default output", R"(
+call  func1
+call  print
+end
 
-    std::cout << "Program #1\n\n";
+func1:
+    call  func2
+    ret
 
-    std::string result = "";
-    try {
-        result = assembler_interpreter(program);
-        std::cout << result << "\n\n";
-    } catch (const std::string& e) {
-        std::cout << e << std::endl;
+func2:
+    ret
+
+print:
+    msg 'This program should return -1')"}, {"#7", "2 to the power of 10", R"(
+mov   a, 2            ; value1
+mov   b, 10           ; value2
+mov   c, a            ; temp1
+mov   d, b            ; temp2
+call  proc_func
+call  print
+end
+
+proc_func:
+    cmp   d, 1
+    je    continue
+    mul   c, a
+    dec   d
+    call  proc_func
+
+continue:
+    ret
+
+print:
+    msg a, '^', b, ' = ', c
+    ret)"}
+    };
+
+    auto toLowerCase = [](std::string& str) -> void {
+        for (char& c : str) {
+            if (c >= 'A' && c <= 'Z') {
+                c += 32;
+            }
+        }
+    };
+    std::string input = "";
+    std::cout << "Type \"help\" or ? to see available commands\n";
+    while (true) {
+        std::cout << ":";
+        std::getline(std::cin, input);
+        std::stringstream ss{input};
+        std::string command = "";
+        std::string arg = "";
+
+        auto findProgram = [&](const std::string& id) -> const program* {
+            for (auto& p : programs) {
+                if (id == p.id) {
+                    return &p;
+                }
+            }
+            return nullptr;
+        };
+
+        ss >> command;
+        toLowerCase(command);
+        if (command == "help" || command == "?") {
+            std::cout
+            << "Available commands:\n"
+            << "\thelp\t\tShow available commands\n"
+            << "\tclear\t\tClear the terminal screen\n"
+            << "\tlist\t\tList programs\n"
+            << "\tshow [id]\tShow a program code\n"
+            << "\trun [id]\tRun a program\n"
+            << "\texit\t\tExit the program\n";
+        } else if (command == "exit") {
+            break;
+        } else if (command == "clear") {
+#ifdef _WIN32
+            std::system("cls");
+#else
+            std::system("clear");
+#endif
+        } else if (command == "list") {
+            std::cout << "ID\tDESCRIPTION\n";
+            std::cout << "--------------------------\n";
+            for (auto& p : programs) {
+                std::cout << p.id << "\t" << p.desc << "\n";
+            }
+        } else if (command == "show") {
+            if (ss >> arg) {
+                const program* p = findProgram(arg);
+                if (p) {
+                    std::cout << p->code << '\n';
+                } else {
+                    std::cout << "Invalid ID: " + arg + '\n';
+                }
+            } else {
+                std::cout << "The argument ID is required\n";
+            }
+        } else if (command == "run") {
+            if (ss >> arg) {
+                const program* p = findProgram(arg);
+                if (p) {
+                    try {
+                        std::cout << "Result of program: \'" << p->desc << "\' is \'" << assembler_interpreter(p->code) << "\'\n";
+                    } catch (const std::string& e) {
+                        std::cout << e << std::endl;
+                    }
+                } else {
+                    std::cout << "Invalid ID: " + arg + "\n";
+                }
+            } else {
+                std::cout << "The argument ID is required\n";
+            }
+        } else {
+            std::cout << command << ": command not found\nType \"help\" or ? to see available commands\n";
+        }
     }
-    
-
-    // std::cout << "1. " << result << '\n';
-    std::cout << "\nProgram #2\n\n";
-
-    try {
-        result = assembler_interpreter(program2);
-        std::cout << result << "\n\n";
-    } catch (const std::string& e) {
-        std::cout << e << std::endl;
-    }
-
-    // std::cout << "2. " << result << '\n';
     return 0;
 }
